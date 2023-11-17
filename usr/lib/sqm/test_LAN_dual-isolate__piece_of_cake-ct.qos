@@ -1,9 +1,18 @@
 #!/bin/sh
 ################################################################################
-# autorate-ct.qos (Cero3 Shaper)
+# test_LAN_triple-isolate__piece_of_cake.qos (Cero3 Shaper)
 #
-# A cake shaper and AQM solution for WatchGuard with partial split tunneling
-# for Ethernet gateways
+# Abstract:
+# This is a one band cake and ipv6 enabled shaping script for Ethernet
+# gateways. This exists for the purpose of testing cake's different isolation
+# options, specifically the non-directional triple-isolate feature that promises
+# to finally tackle the bit-torrent hole in simple.qos.
+# This specific version is supposed to be used on LAN interfaces:
+# 	the script's ingress direction equals the internet/WAN upload direction
+# 	the script's egress direction equals the internet/WAN download direction
+#
+# NOTE: Shaping on a LAN interface only affects machines connected via that
+#	LAN interface, so typically WIFI/WLAN traffic will not be shaped!
 #
 ################################################################################
 #
@@ -16,7 +25,6 @@
 #
 ################################################################################
 
-#sm: TODO pass in the cake diffserv keyword
 
 . ${SQM_LIB_DIR}/defaults.sh
 
@@ -28,28 +36,13 @@ QDISC=cake
 
 
 # to keep this as simple as possible we ignore the *_CAKE_OPTS from defaults.sh
-# As in piece_of_cake.qos, we ignore the *_CAKE_OPTS from defaults.sh
-# and force all ingress through the one ifb attached to both the wan and vpn interfaces
 
-INGRESS_CAKE_OPTS=""
-EGRESS_CAKE_OPTS=""
-# No sqm_prepare_script() as able to use sqm_start_default() without adjustment
-# stop-sqm failure to find ifb-ingress on 2nd znd subsequent SQM Sessions should be ignored
-# ToDo - remove hard coding of wan interface
+INGRESS_CAKE_OPTS="besteffort dual-srchost"
+EGRESS_CAKE_OPTS="besteffort dual-dsthost"
 
 egress() {
     sqm_debug "egress"
 
-    wg_endpoint=$(wg show | awk '{if($1 == "endpoint:"){split($2,a,":"); print a[1]}}')
-    if [ "$IFACE" == "eth0" ] && [ -n "$wg_endpoint" ]; then
-        # With a VPN traffic, CAKE on WAN upload must be 'besteffort flows' to work with skb->hash preservation
-        EGRESS_CAKE_OPTS="besteffort flows"
-        # UPLOAD should be set in Luci on both interfaces to 18000 
-    else
-        # apply CAKE 'diffserv4 ack-filter' on VPN (or WAN when VPN not present)
-        EGRESS_CAKE_OPTS="diffserv4 triple-isolate nat ack-filter"
-        # UPLOAD should be set in Luci on both interfaces to 65000 
-    fi
 
     SILENT=1 $TC qdisc del dev $IFACE root
     $TC qdisc add dev $IFACE root $( get_stab_string ) cake \
@@ -63,25 +56,9 @@ ingress() {
     SILENT=1 $TC qdisc del dev $IFACE handle ffff: ingress
     $TC qdisc add dev $IFACE handle ffff: ingress
 
-    # if 'wg show' reports an endpoint, then pass over WireGuard packets on WAN
-    # Assumes wan="eth0"
-    wg_endpoint=$(wg show | awk '{if($1 == "endpoint:"){split($2,a,":"); print a[1]}}')
-    if [ "$IFACE" == "eth0" ] && [ -n "$wg_endpoint" ]; then
-		$TC filter add dev $IFACE parent ffff: protocol ip prio 1 u32 match ip src ${wg_endpoint}/32 action pass
-	fi
-
     SILENT=1 $TC qdisc del dev $DEV root
 
-    # Configure CAKE options: force differv4 on ingress
-    INGRESS_CAKE_OPTS="diffserv4 triple-isolate nat ingress"
 
-    # These both need setting to 0 in /et/config/sqm to fully benefit from diffserv4 on ingress
-    # i had thought of forcing these too (they default to 1 in luci) but want to allow user control
-    # If ive got this right, Dangerous mode should not be needed in normal use
-    [ "$IGNORE_DSCP_INGRESS" -eq "1" ] && INGRESS_CAKE_OPTS="$INGRESS_CAKE_OPTS besteffort"
-    [ "$ZERO_DSCP_INGRESS" -eq "1" ] && INGRESS_CAKE_OPTS="$INGRESS_CAKE_OPTS wash"
-
-    # DOWNLOAD should be set in Luci on both interfaces to 65000 
     $TC qdisc add dev $DEV root $( get_stab_string ) cake \
         bandwidth ${DOWNLINK}kbit $( get_cake_lla_string ) ${INGRESS_CAKE_OPTS} ${IQDISC_OPTS}
 
@@ -109,11 +86,52 @@ ingress() {
 
     # Remove flowid 1:1 as this can make cake 'flow blind' see:
     # https://lists.bufferbloat.net/pipermail/cake/2019-September/005031.html
-    $TC filter add dev $IFACE parent ffff: prio 2 matchall \
+    $TC filter add dev $IFACE parent ffff: matchall \
     action ctinfo dscp 0x0000003f mirred egress redirect dev $DEV
 }
 
-# Redefine function from ./functions.sh
-ifb_name() {
-    echo "ifb-ingress"
+sqm_start() {
+
+    #sm: flip upload and download bandwith so that the GUI values reflect directionality in regard to the ISP
+    #sm: NOTE this is ugly and should be performed in defaults.sh or functions.sh if at all
+    #sm: but for quick and dirty testing this should do
+    local ORIG_UPLINK=${UPLINK}
+    local ORIG_DOWNLINK=${DOWNLINK}
+    UPLINK=${ORIG_DOWNLINK}
+    DOWNLINK=${ORIG_UPLINK}
+
+
+    [ -n "$IFACE" ] || return 1
+
+
+    do_modules
+    verify_qdisc $QDISC "cake" || return 1
+    sqm_debug "sqm_start: Starting ${SCRIPT}"
+
+    [ -z "$DEV" ] && DEV=$( get_ifb_for_if ${IFACE} )
+
+
+    if [ "${UPLINK}" -ne 0 ];
+    then
+	    fn_exists egress && egress || sqm_warn "sqm_start_default: ${SCRIPT} lacks an egress() function"
+        #egress
+        sqm_debug "sqm_start: egress shaping activated"
+    else
+        sqm_debug "sqm_start: egress shaping deactivated"
+        SILENT=1 $TC qdisc del dev ${IFACE} root
+    fi
+
+
+    if [ "${DOWNLINK}" -ne 0 ];
+    then
+    	verify_qdisc ingress "ingress" || return 1
+    	fn_exists ingress && ingress || sqm_warn "sqm_start_default: ${SCRIPT} lacks an ingress() function"
+        #ingress
+        sqm_debug "sqm_start: ingress shaping activated"
+    else
+        sqm_debug "sqm_start: ingress shaping deactivated"
+        SILENT=1 $TC qdisc del dev ${DEV} root
+        SILENT=1 $TC qdisc del dev ${IFACE} ingress
+    fi
+    return 0
 }
