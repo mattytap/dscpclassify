@@ -1,22 +1,27 @@
 # DSCP Classify
+
 An nftables based service for applying DSCP classifications to connections, compatible with OpenWrt's firewall4 for dynamically setting DSCP packet marks (this only works in OpenWrt 22.03 and above).
 
 This should be used in conjunction with layer-cake SQM queue with ctinfo configured to restore DSCP on the device ingress.
 The dscpclassify service uses the last 8 bits of the conntrack mark (0x000000ff).
 
 ## Classification modes
+
 The service supports three modes for classifying and DSCP marking connections.
 
 ### User rules
+
 The service will first attempt to classify new connections using rules specified by the user in the config file.<br />
 These follow a similar syntax to the OpenWrt firewall config and can match upon source/destination ports and IPs, firewall zones etc.<br />
 The rules support the use of nft sets, which could be dynamically updated from external sources such as dsnmasq. <br />
 
 ### Client DSCP hinting
+
 The service can be configured to apply the DSCP mark supplied by a non WAN originating client.<br />
 This function ignores CS6 and CS7 classes to avoid abuse from inappropriately configed LAN clients such as IoT devices.
 
 ### Dynamic classification
+
 Connections that do not match a pre-specified rule will be dynamically classified by the service via two mechanisms:
 
 * Multi-connection client port detection for detecting P2P traffic
@@ -27,15 +32,18 @@ Connections that do not match a pre-specified rule will be dynamically classifie
     * diffserv8: Below besteffort (CS0) traffic, but above low effort (LE) traffic.
 
 ### External classification
+
 The service will respect DSCP classification stored by an external service in a connection's conntrack bits, this could include services such as netifyd.
 
 ## Service architecture
+
 ![image](https://user-images.githubusercontent.com/46714706/188151111-9167e54d-482e-4584-b43b-0759e0ad7561.png)
 
 ## Service installation
+
 To install the dscpclassify service via command line you can use the following:
 
-```
+```bash
 repo="https://raw.githubusercontent.com/mattytap/dscpclassify/mattytap"
 mkdir -p "/etc/dscpclassify.d"
 if [ ! -f "/etc/config/dscpclassify" ]; then
@@ -55,7 +63,7 @@ chmod +x "/etc/init.d/dscpclassify"
 
 **SQM should be installed and configured on your device**
 
-The OpenWrt guide for configuring this is here https://openwrt.org/docs/guide-user/network/traffic-shaping/sqm
+The OpenWrt guide for configuring this is here <https://openwrt.org/docs/guide-user/network/traffic-shaping/sqm>
 
 Ingress DSCP marking requires the SQM queue setup script 'layer_cake_ct.qos' and the package 'kmod-sched-ctinfo'.
 
@@ -72,6 +80,7 @@ wget "$repo/usr/lib/sqm/layer_cake_ct.qos.help" -O "/usr/lib/sqm/layer_cake_ct.q
 ```
 
 ## Service configuration
+
 The user rules in '/etc/config/dscpclassify' use the same syntax as OpenWrt's firewall config, the 'class' option is used to specified the desired DSCP.
 
 A working default configuration is provided with the service.
@@ -97,16 +106,17 @@ A working default configuration is provided with the service.
 
 ```
 config rule
-	option name 'DNS'
-	list proto 'tcp'
-	list proto 'udp'
-	list dest_port '53'
-	list dest_port '853'
-	list dest_port '5353'
-	option class 'cs5'
-	option counter '0'
+ option name 'DNS'
+ list proto 'tcp'
+ list proto 'udp'
+ list dest_port '53'
+ list dest_port '853'
+ list dest_port '5353'
+ option class 'cs5'
+ option counter '0'
 ```
-The OpenWrt firewall syntax is outlined here https://openwrt.org/docs/guide-user/firewall/firewall_configuration
+
+The OpenWrt firewall syntax is outlined here <https://openwrt.org/docs/guide-user/firewall/firewall_configuration>
 
 The counter option can be enabled to count the number of matched connections for a rule.
 
@@ -143,9 +153,9 @@ DSCPClassify is a service for OpenWRT that applies DSCP classification to connec
 
 DSCPClassify supports three modes of operation, which can be used separately or in combination:
 
-- User rules: Allow you to specify rules for classifying connections in /etc/config/dscpclassify.
-- Client DSCP hinting: If enabled, the service will apply the DSCP mark supplied by the client, unless the mark is in the list of ignored DSCP classes.
-- Dynamic classification: If enabled, the service will classify connections that don't match user rules based on destination port, destination IP address, and the number of connections from the client to the server.
+* User rules: Allow you to specify rules for classifying connections in /etc/config/dscpclassify.
+* Client DSCP hinting: If enabled, the service will apply the DSCP mark supplied by the client, unless the mark is in the list of ignored DSCP classes.
+* Dynamic classification: If enabled, the service will classify connections that don't match user rules based on destination port, destination IP address, and the number of connections from the client to the server.
 
 DSCPClassify can also respect DSCP marks stored in connection tracking by other services, such as netifyd.
 
@@ -153,8 +163,8 @@ DSCPClassify can also respect DSCP marks stored in connection tracking by other 
 
 To install DSCPClassify, follow these steps:
 
-- Install the required packages
-- Enable and start the service
+* Install the required packages
+* Enable and start the service
 
 For more details, refer to the [original repository](https://github.com/jeverley/dscpclassify).
 
@@ -164,8 +174,8 @@ DSCPClassify is configured through /etc/config/dscpclassify. See [config.example
 
 ### Limitations
 
-- DSCPClassify only supports IPv4 connections.
-- The service requires the nftables conntrack module, which is not available on all platforms.
+* DSCPClassify only supports IPv4 connections.
+* The service requires the nftables conntrack module, which is not available on all platforms.
 
 ## Acknowledgements and Thanks
 
